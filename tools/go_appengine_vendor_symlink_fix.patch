@@ -1,0 +1,71 @@
+diff -bur go_appengine/google/appengine/tools/devappserver2/application_configuration.py go_appengine_vendor_symlink_fix/google/appengine/tools/devappserver2/application_configuration.py
+--- go_appengine/google/appengine/tools/devappserver2/application_configuration.py	2016-05-19 05:21:12.000000000 -0700
++++ go_appengine_vendor_symlink_fix/google/appengine/tools/devappserver2/application_configuration.py	2016-07-13 10:21:25.000000000 -0700
+@@ -75,6 +75,32 @@
+   return os.path.isdir(java_dir)
+ 
+ 
++def get_current_dir_name():
++  """
++  Implementation from https://bugs.python.org/issue1154351.
++
++  Return a string representing the current working directory taking into
++  consideration the users *PWD* environment variable if it exists. This
++  is opposed to getcwd() which dereferences symlinks in the path. This
++  function is identical to getcwd() on systems that do *not* support
++  the *PWD* environment variable.
++  """
++  cwd = os.getcwd()
++
++  try:
++    pwd = os.environ["PWD"]
++  except KeyError:
++    return cwd
++
++  cwd_stat, pwd_stat = map(os.stat, [cwd, pwd])
++
++  if (cwd_stat.st_dev == pwd_stat.st_dev and
++          cwd_stat.st_ino == pwd_stat.st_ino):
++    return pwd
++  else:
++    return cwd
++
++
+ class ModuleConfiguration(object):
+   """Stores module configuration information.
+ 
+@@ -121,6 +147,7 @@
+       # have something like /foo/bar/app.yaml, with application root /foo/bar.
+       root = os.path.dirname(root)
+     self._application_root = os.path.realpath(root)
++    self._application_sym_root = os.path.join(get_current_dir_name(), root)
+     self._last_failure_message = None
+ 
+     self._app_info_external, files_to_check = self._parse_configuration(
+@@ -209,6 +236,11 @@
+     return self._application_root
+ 
+   @property
++  def application_sym_root(self):
++    """Like application_root, but maintaining any symbolic links from PWD."""
++    return self._application_sym_root
++
++  @property
+   def application(self):
+     return self._application
+ 
+diff -bur go_appengine/google/appengine/tools/devappserver2/go_application.py go_appengine_vendor_symlink_fix/google/appengine/tools/devappserver2/go_application.py
+--- go_appengine/google/appengine/tools/devappserver2/go_application.py	2016-05-19 05:21:12.000000000 -0700
++++ go_appengine_vendor_symlink_fix/google/appengine/tools/devappserver2/go_application.py	2016-07-13 10:26:43.000000000 -0700
+@@ -175,9 +175,9 @@
+         gab_extra_args, env)
+ 
+   def get_environment(self):
+-    """Return the environment that used be used to run the Go executable."""
++    """Return the environment that will be used to run the Go executable."""
+     environ = {'GOROOT': GOROOT,
+-               'PWD': self._module_configuration.application_root,
++               'PWD': self._module_configuration.application_sym_root,
+                'TZ': 'UTC',
+                'RUN_WITH_DEVAPPSERVER': '1'}
+     if 'SYSTEMROOT' in os.environ:
